@@ -1,0 +1,13 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.deleteUser = exports.updateUser = exports.getUserById = exports.getUsers = void 0;
+const client_1 = require("@prisma/client");
+const prisma = new client_1.PrismaClient();
+const getUsers = async () => prisma.user.findMany({ include: { roles: true } });
+exports.getUsers = getUsers;
+const getUserById = async (id) => prisma.user.findUnique({ where: { id }, include: { roles: true } });
+exports.getUserById = getUserById;
+const updateUser = async (id, data) => prisma.user.update({ where: { id }, data });
+exports.updateUser = updateUser;
+const deleteUser = async (id) => prisma.user.delete({ where: { id } });
+exports.deleteUser = deleteUser;

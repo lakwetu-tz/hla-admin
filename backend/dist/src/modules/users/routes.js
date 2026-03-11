@@ -1,0 +1,12 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const controller_1 = require("./controller");
+const auth_guard_1 = require("../../core/guards/auth.guard");
+const rbac_guard_1 = require("../../core/guards/rbac.guard");
+const router = (0, express_1.Router)();
+router.get('/', auth_guard_1.authenticate, (0, rbac_guard_1.checkPermission)('view_users'), controller_1.listUsers);
+router.get('/:id', auth_guard_1.authenticate, (0, rbac_guard_1.checkPermission)('view_user'), controller_1.getUser);
+router.put('/:id', auth_guard_1.authenticate, (0, rbac_guard_1.checkPermission)('edit_user'), controller_1.update);
+router.delete('/:id', auth_guard_1.authenticate, (0, rbac_guard_1.checkPermission)('delete_user'), controller_1.remove);
+exports.default = router;
