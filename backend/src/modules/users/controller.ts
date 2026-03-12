@@ -1,27 +1,68 @@
 import { Request, Response } from 'express';
-import { getUsers, getUserById, updateUser, deleteUser } from './service';
-import { setCache, getCache } from '../../cache/redis';
+import * as userService from './service';
+import logger from '../../core/utils/logger';
 
-export const listUsers = async (req: Request, res: Response) => {
-  const cached = await getCache('users');
-  if (cached) return res.json(cached);
-  const users = await getUsers();
-  await setCache('users', users);
-  res.json(users);
+export const getStaff = async (req: Request, res: Response) => {
+  try {
+    const staff = await userService.getStaff();
+    res.json(staff);
+  } catch (error: any) {
+    logger.error(error);
+    res.status(500).json({ error: 'Failed to fetch staff' });
+  }
 };
 
-export const getUser = async (req: Request, res: Response) => {
-  const user = await getUserById(req.params.id as string);
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json(user);
+export const createStaff = async (req: Request, res: Response) => {
+  try {
+    const adminId = (req as any).user?.id;
+    const { email, name, role } = req.body;
+
+    const result = await userService.createStaff(adminId, { email, name, roleName: role });
+    res.status(201).json(result);
+  } catch (error: any) {
+    logger.error(error);
+    res.status(400).json({ error: error.message || 'Failed to create staff' });
+  }
 };
 
-export const update = async (req: Request, res: Response) => {
-  const user = await updateUser(req.params.id as string, req.body);
-  res.json(user);
+export const updateStaff = async (req: Request, res: Response) => {
+  try {
+    const adminId = (req as any).user?.id;
+    const { id } = req.params;
+    const data = req.body;
+
+    // Ensure id is a string
+    const staffId = Array.isArray(id) ? id[0] : id;
+
+    const updated = await userService.updateStaff(adminId, staffId, data);
+    res.json(updated);
+  } catch (error: any) {
+    logger.error(error);
+    res.status(400).json({ error: 'Failed to update staff' });
+  }
 };
 
-export const remove = async (req: Request, res: Response) => {
-  await deleteUser(req.params.id as string);
-  res.json({ message: 'User deleted' });
+export const deleteStaff = async (req: Request, res: Response) => {
+  try {
+    const adminId = (req as any).user?.id;
+    const { id } = req.params;
+
+    // Ensure id is a string
+    const staffId = Array.isArray(id) ? id[0] : id;
+
+    await userService.deleteStaff(adminId, staffId);
+    res.json({ message: 'Staff member deleted successfully' });
+  } catch (error: any) {
+    logger.error(error);
+    res.status(400).json({ error: 'Failed to delete staff' });
+  }
+};
+
+export const getAuditLogs = async (req: Request, res: Response) => {
+  try {
+    const logs = await userService.getAuditLogs();
+    res.json(logs);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch audit logs' });
+  }
 };

@@ -3,7 +3,8 @@
 import { createContext, useContext, ReactNode, useEffect, useState, useCallback } from "react"
 import { useAuthStore } from "@/store/authStore"
 
-export type UserRole = "super_admin" | "event_manager" | "finance_manager" | "admin"
+// Unified role types to match backend exactly
+export type UserRole = "super_admin" | "event_manager" | "finance_manager" | "admin" | "exhibitor" | "buyer" | "visitor"
 
 export interface User {
   id: string
@@ -38,7 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser({
         id: storeUser.id,
         email: storeUser.email,
-        name: storeUser.name,
+        name: storeUser.name || "",
         role: userRole as UserRole,
         lastLogin: new Date().toISOString()
       })
@@ -90,4 +91,14 @@ export function canAccessModule(role: UserRole, module: string): boolean {
     admin: ["dashboard"]
   }
   return permissions[role]?.includes(module) ?? false
+}
+
+export function canEditModule(role: UserRole, module: string): boolean {
+  const editPermissions: Record<string, string[]> = {
+    super_admin: ["applications", "halls", "invoices", "payments", "users", "placements", "tickets", "settings"],
+    event_manager: ["applications", "halls", "tickets"],
+    finance_manager: ["invoices", "payments", "tickets"],
+    admin: []
+  }
+  return editPermissions[role]?.includes(module) ?? false
 }

@@ -1,128 +1,105 @@
-<!--
-Generated on: May 22, 2024
-Project: Horti Logistica Africa
-Status: Backend fully implemented + Frontend Auth Foundation Ready
-Do not edit manually – regenerate after backend connection
--->
+# Horti Logistica Africa – Auth Implementation & Story
 
-# Horti Logistica Africa – Backend Implementation & Frontend Auth Integration Status
-
-## 1. Project Overview & Technology Stack
-
-**Project Goal**: A high-performance, scalable admin dashboard for managing horticulture logistics across Africa.
-
-**Backend Stack**:
-- **Runtime**: Node.js with TypeScript
-- **Framework**: Express.js (v5.2.1)
-- **Database**: PostgreSQL with Prisma ORM
-- **Caching & Queues**: Redis (ioredis) & BullMQ
-- **Real-time**: Socket.io
-- **Security**: JWT, bcrypt, helmet, rate-limiting, xss-clean
-- **Documentation**: Swagger UI
-- **Logging**: Pino
-- **Storage**: AWS S3 (SDK v3)
-
-**Frontend Stack (Current)**:
-- **Framework**: Next.js 15 (App Router)
-- **State Management**: Zustand (Persisted)
-- **Data Fetching**: TanStack Query (v5)
-- **API Client**: Axios
+This document outlines the end-to-end authentication and authorization flow implemented for the HLA Admin Dashboard. It follows modern security standards, including **JWT Access/Refresh Tokens**, **httpOnly Cookies**, and **Token Rotation**.
 
 ---
 
-## 2. Backend Architecture (Full Details)
+## 🛡️ The Auth Story: From Login to Logout
 
-### Folder Structure
-```text
-backend/
-├── prisma/
-│   ├── schema.prisma          # Database schema (PostgreSQL)
-│   └── seed.ts                # Initial data seeding
-├── src/
-│   ├── core/                  # Middleware, Guards, Error handlers
-│   ├── modules/               # Feature-based modules (Auth, Users, etc.)
-│   ├── services/              # Shared business logic
-│   ├── generated/             # Prisma client generation
-│   ├── cache/                 # Redis connection
-│   ├── queues/                # BullMQ background workers
-│   ├── events/                # Socket.io & Event emitters
-│   └── server.ts              # Application entry point
-├── package.json
-└── tsconfig.json
+### 1. The Gateway (Login)
+The journey begins at the login screen. When a user submits their email and password:
+- **Frontend**: `authService.login()` (in `frontend/features/auth/service.ts`) sends a POST request to `/auth/login`.
+- **Backend**: The `login` controller (in `backend/src/modules/auth/controller.ts`) calls the auth service to verify the user via Prisma and `bcrypt`.
+- **Token Generation**: If valid, the backend generates a short-lived **AccessToken** (15m) and a long-lived **RefreshToken** (7d).
+
+```typescript
+// backend/src/modules/auth/controller.ts
+export const login = async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+  const user = await loginUser(email, password);
+  const { accessToken, refreshToken } = generateTokens(user.id);
+
+  // Secure cookie for Refresh Token
+  res.cookie('refreshToken', refreshToken, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+
+  res.json({ accessToken, user });
+};
 ```
 
-### Prisma Schema Highlights
-Key models implemented for RBAC (Role-Based Access Control):
-- **User**: ID, email, hashed password, verification status.
-- **Role**: Unique names (e.g., `super_admin`).
-- **Permission**: Atomic permissions for modules.
-- **UserRole / RolePermission**: Junction tables for many-to-many relationships.
-- **AuditLog**: Track system actions.
-- **Analytic**: Metric tracking for the dashboard.
+### 2. Guarding the State (Zustand)
+Once the login is successful:
+- **Frontend**: The `authStore.ts` (Zustand) stores the `user` object in `localStorage` (persisted), but the `accessToken` is kept **strictly in memory**.
+- This hybrid approach ensures the user stays "logged in" visually across refreshes, but the sensitive token isn't easily accessible to XSS attacks via `localStorage`.
 
-### Security Implementation
-- **JWT**: Stateless authentication with access and refresh tokens.
-- **RBAC**: Middleware-based permission checking.
-- **Rate Limiting**: `express-rate-limit` to prevent brute force.
-- **Sanitization**: `xss-clean` and `hpp` for parameter pollution.
+### 3. Traveling with Identity (API Interceptors)
+Every time the dashboard needs data (e.g., listing users or analytics):
+- **Frontend**: The Axios instance in `frontend/services/api.ts` uses a **Request Interceptor** to automatically inject the `accessToken` from the Zustand store into the `Authorization` header.
+- **Backend**: The `auth.middleware.ts` intercepts the request, verifies the JWT, and attaches the user ID to the request object (`req.user`).
 
----
+```typescript
+// frontend/services/api.ts (Request Interceptor)
+api.interceptors.request.use((config) => {
+  const token = useAuthStore.getState().accessToken;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+```
 
-## 3. Frontend Auth Implementation (Current State)
+### 4. The Invisible Hand (Token Refresh & Rotation)
+When the 15-minute `accessToken` expires, the backend returns a `401 Unauthorized`.
+- **Frontend**: The **Response Interceptor** in `api.ts` catches the 401 error.
+- It automatically triggers a call to `/auth/refresh`. Since the `refreshToken` is in an `httpOnly` cookie, the browser sends it automatically.
+- **Backend**: The `refresh` controller verifies the old refresh token and **rotates** it—issuing a brand new Refresh Token cookie and a new Access Token. This ensures that if a token is ever stolen, it becomes useless as soon as the legitimate user refreshes.
+- **Frontend**: Retries the original failed request with the new token. The user experiences zero interruption.
 
-### Architecture Highlights
-- **Route Groups**: 
-  - `(public)`: Contains the login page.
-  - `(dashboard)`: Contains protected `/admin` routes.
-- **Zustand (`authStore.ts`)**: Centralized, persisted store for the `user` object and JWT tokens.
-- **Axios (`api.ts`)**: Configured with interceptors to automatically attach `Authorization` headers.
-- **Middleware (`middleware.ts`)**: Edge-level redirection for unauthorized users.
+### 5. Saying Goodbye (Logout)
+When the user clicks logout:
+- **Frontend**: `authStore.logout()` is called to clear the local state and `localStorage`.
+- **Backend**: The `/auth/logout` endpoint is called.
+- **Security**: The backend explicitly clears the `refreshToken` cookie by setting its expiration to the past.
 
-### Current Flow (Mock)
-1. User enters credentials in `LoginForm`.
-2. `useAuth` hook triggers `authService.login`.
-3. Service returns mock user and tokens (simulating backend).
-4. Zustand updates `isAuthenticated: true`.
-5. User is redirected to `/admin` and recognized by `DashboardWrapper`.
-
----
-
-## 4. Files & Code That Will Be Removed / Cleaned After Successful Backend Integration
-
-| File / Section | Action | Reason |
-| :--- | :--- | :--- |
-| `lib/auth-context.tsx` | **Delete** | Legacy React Context replaced by Zustand. |
-| `features/auth/service.ts` | **Refactor** | Replace mock `Promise` with real `api.post` calls. |
-| `app/admin/layout.tsx` | **Cleanup** | Remove the `<AuthProvider>` wrapper once legacy components migrate. |
-| `next.config.mjs` | **Edit** | Remove `ignoreBuildErrors: true` for production safety. |
-| `lib/mock-data.ts` | **Deprecate** | Replace with real TanStack Query hooks. |
-
----
-
-## 5. Migration & Connection Roadmap (Next Steps)
-
-1. **Environment Config**: Update `.env.local` with the actual `NEXT_PUBLIC_API_URL`.
-2. **Endpoint Mapping**:
-   - `POST /auth/login`
-   - `POST /auth/refresh`
-   - `GET /auth/me`
-3. **Token Interceptor**: Finalize the `401` response interceptor in `api.ts` to call the refresh endpoint.
-4. **Cookie Strategy**: Switch from `localStorage` to `httpOnly` cookies for the refresh token (Architect recommended).
-5. **Role Mapping**: Ensure backend role strings match the frontend `Role` type.
+```typescript
+// backend/src/modules/auth/controller.ts
+export const logout = (req: Request, res: Response) => {
+  res.clearCookie('refreshToken', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    expires: new Date(0),
+  });
+  res.status(200).json({ message: 'Logged out successfully' });
+};
+```
 
 ---
 
-## 6. Architect’s Thoughts on This Step
+## 📂 Involved Files
 
-### Quality Assessment
-The foundation is **excellent**. Splitting the app into route groups (`public`/`dashboard`) prevents layout thrashing. Using **Zustand** over Context for auth is the right choice for an admin dashboard—it's faster, easier to debug with Redux DevTools, and provides built-in persistence.
+### 🔙 Backend (Core Logic)
+- `src/modules/auth/controller.ts`: Handles HTTP requests for login, logout, and refresh.
+- `src/modules/auth/service.ts`: Business logic (Prisma queries, JWT signing, password hashing).
+- `src/modules/auth/routes.ts`: Defines endpoint paths.
+- `src/core/middleware/auth.middleware.ts`: Protects private routes by verifying AccessTokens.
 
-### Scalability
-The use of **TanStack Query** alongside Zustand ensures that "Server State" (API data) and "Client State" (UI toggles/Auth) never mix, which is crucial as the project grows to include complex modules like Hall Management and Invoicing.
+### 🎨 Frontend (Client Logic)
+- `store/authStore.ts`: Zustand store managing user state and memory-based tokens.
+- `services/api.ts`: Axios configuration with interceptors for token injection and automatic 401 refreshing.
+- `features/auth/service.ts`: Clean API wrappers for auth endpoints.
+- `src/middleware.ts`: Next.js Edge middleware for initial route protection based on cookie presence.
 
-### Risks & Improvements
-1. **Security**: Currently, tokens are in `localStorage`. For production, I strongly recommend moving the **Refresh Token** to an `httpOnly` cookie to mitigate XSS risks.
-2. **Backend Sync**: Ensure the Prisma schema's `User` model matches the `User` interface in the frontend exactly to avoid runtime type errors.
-3. **Middleware**: The Next.js middleware should be tightened to check for a specific session cookie once the backend integration begins.
+---
 
-**Professional Opinion**: The system is modular, typed, and clean. It is 100% ready for Phase 2 integration.
+## ✅ Implementation Status: PRODUCTION READY
+The current implementation adheres to the **"Security-First"** architecture:
+1. **XSS Protection**: AccessToken is in-memory; RefreshToken is httpOnly.
+2. **CSRF Protection**: Cookies use `SameSite=Lax`.
+3. **Replay Protection**: Refresh Token Rotation is active.
+4. **UX**: Seamless silent refreshing.

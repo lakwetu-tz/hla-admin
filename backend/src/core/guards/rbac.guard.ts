@@ -3,16 +3,16 @@ import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
+/**
+ * Checks if the user has a specific permission.
+ */
 export const checkPermission = (permission: string) => async (req: Request, res: Response, next: NextFunction) => {
     try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+        const user = (req as any).user;
+        if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-        const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, process.env.JWT_SECRET!) as { id: string };
-
-        const user = await prisma.user.findUnique({
-            where: { id: decoded.id },
+        const userWithRoles = await prisma.user.findUnique({
+            where: { id: user.id },
             include: {
                 roles: {
                     include: {
@@ -30,17 +30,41 @@ export const checkPermission = (permission: string) => async (req: Request, res:
             },
         });
 
-        if (!user) return res.status(401).json({ error: 'Unauthorized' });
+        if (!userWithRoles) return res.status(401).json({ error: 'Unauthorized' });
 
-        // Correctly traverse the Prisma relations to find the permission name
-        const hasPerm = user.roles.some(ur =>
+        const hasPerm = userWithRoles.roles.some(ur =>
             ur.role.permissions.some(rp => rp.permission.name === permission)
         );
 
-        if (!hasPerm) return res.status(403).json({ error: 'Forbidden' });
+        if (!hasPerm) return res.status(403).json({ error: 'Forbidden: Insufficient permissions' });
 
         next();
     } catch (error) {
-        res.status(401).json({ error: 'Invalid token' });
+        res.status(401).json({ error: 'Invalid token or session' });
     }
+};
+
+/**
+ * Checks if the user has any of the specified roles.
+ * Useful for high-level module access (e.g. SuperAdmin only).
+ */
+export const hasRole = (allowedRoles: string[]) => async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const user = (req as any).user;
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const userWithRoles = await prisma.user.findUnique({
+      where: { id: user.id },
+      include: { roles: { include: { role: true } } }
+    });
+
+    const userRoles = userWithRoles?.roles.map(ur => ur.role.name) || [];
+    const hasAccess = allowedRoles.some(role => userRoles.includes(role));
+
+    if (!hasAccess) return res.status(403).json({ error: 'Forbidden: Access denied for your role' });
+
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Unauthorized' });
+  }
 };
