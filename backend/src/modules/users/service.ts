@@ -6,13 +6,13 @@ const prisma = new PrismaClient();
 /**
  * Audit Log Helper
  */
-const createAuditLog = async (userId: string | undefined, action: string, details: any) => {
+const createAuditLog = async (userId: string | undefined, action: string, details: string) => {
   try {
     await prisma.auditLog.create({
       data: {
         userId,
         action,
-        details: typeof details === 'string' ? details : JSON.stringify(details),
+        details,
         timestamp: new Date(),
       },
     });
@@ -41,7 +41,7 @@ export const getStaff = async () => {
         some: {
           role: {
             name: {
-              in: ['SuperAdmin', 'FinanceManager', 'EventManager']
+              in: ['super_admin', 'finance_manager', 'event_manager']
             }
           }
         }
@@ -81,31 +81,64 @@ export const createStaff = async (adminId: string, data: { email: string, name: 
     });
   }
 
-  await createAuditLog(adminId, 'CREATE_STAFF_MEMBER', {
-    targetUserId: user.id,
-    email: data.email,
-    role: data.roleName
-  });
+  await createAuditLog(
+      adminId,
+      'CREATE_STAFF_MEMBER',
+      `Created new staff member: ${data.name} with Password: ${tempPassword}`
+    );
 
   return { ...user, tempPassword }; // Return temp password once for admin to share (In production, send email)
 };
 
 export const updateStaff = async (adminId: string, id: string, data: any) => {
+  const { role: roleName, ...userData } = data;
+
+  // 1. Update user basic info
   const updatedUser = await prisma.user.update({
     where: { id },
-    data,
+    // Only pass fields that exist on the User model
+    data: userData,
     include: { roles: { include: { role: true } } }
   });
 
-  await createAuditLog(adminId, 'UPDATE_STAFF_MEMBER', { targetUserId: id, changes: data });
+  // 2. Handle role update if provided
+  if (roleName) {
+    const role = await prisma.role.findUnique({ where: { name: roleName } });
+    if (role) {
+      // Replace old roles with the new one
+      await prisma.userRole.deleteMany({ where: { userId: id } });
+      await prisma.userRole.create({
+        data: {
+          userId: id,
+          roleId: role.id
+        }
+      });
+    }
+  }
 
-  return updatedUser;
+  // Fetch the final state for return and audit log
+  const finalUser = await prisma.user.findUnique({
+    where: { id },
+    include: { roles: { include: { role: true } } }
+  });
+
+  await createAuditLog(
+      adminId,
+      'UPDATE_STAFF_MEMBER',
+      `Updated staff profile for ${finalUser?.name} (${finalUser?.email}). Fields modified: ${Object.keys(data).join(', ')}`
+    );
+
+  return finalUser;
 };
 
 export const deleteStaff = async (adminId: string, id: string) => {
   const user = await prisma.user.delete({ where: { id } });
 
-  await createAuditLog(adminId, 'DELETE_STAFF_MEMBER', { targetUserId: id, email: user.email });
+  await createAuditLog(
+      adminId,
+      'DELETE_STAFF_MEMBER',
+      `Permanently removed staff member: ${user.name} (${user.email}) from the system`
+    );
 
   return user;
 };

@@ -16,7 +16,50 @@ async function main() {
 
   console.log('Roles seeded successfully.');
 
-  // Create initial SuperAdmin if not exists
+    // 2. Define Permissions
+     const permissions = [
+       'MANAGE_STAFF',
+       'VIEW_AUDIT_LOGS',
+       'MANAGE_APPLICATIONS',
+       'MANAGE_HALLS',
+       'MANAGE_INVOICES',
+       'MANAGE_PAYMENTS',
+       'VIEW_ANALYTICS'
+     ];
+
+  for (const permName of permissions) {
+       await prisma.permission.upsert({
+         where: { name: permName },
+         update: {},
+         create: { name: permName },
+       });
+     }
+
+     console.log('Roles and Permissions seeded successfully.');
+
+     // 3. Link All Permissions to Super Admin
+     const superAdminRole = await prisma.role.findUnique({ where: { name: 'super_admin' } });
+     const allPermissions = await prisma.permission.findMany();
+
+     if (superAdminRole) {
+       for (const perm of allPermissions) {
+         await prisma.rolePermission.upsert({
+           where: {
+             roleId_permissionId: {
+               roleId: superAdminRole.id,
+               permissionId: perm.id,
+             },
+           },
+           update: {},
+           create: {
+             roleId: superAdminRole.id,
+             permissionId: perm.id,
+           },
+         });
+       }
+     }
+
+     // 4. Create initial SuperAdmin user
   const adminEmail = 'admin@hla.com';
   const hashedPassword = await bcrypt.hash('admin123', 10);
 
@@ -25,13 +68,13 @@ async function main() {
     update: {},
     create: {
       email: adminEmail,
-      name: 'System Admin',
+      name: 'Enock Samuel',
       password: hashedPassword,
       isVerified: true,
     },
   });
 
-  const superAdminRole = await prisma.role.findUnique({ where: { name: 'super_admin' } });
+
   if (superAdminRole) {
     await prisma.userRole.upsert({
       where: {

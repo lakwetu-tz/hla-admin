@@ -3,7 +3,6 @@
 import { useState } from "react"
 import {
   Search,
-  Plus,
   Edit,
   Trash2,
   UserPlus,
@@ -51,8 +50,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useStaff, useCreateStaff, useDeleteStaff, useAuditLogs } from "@/hooks/useStaff"
-import { StaffMember, AuditLog as AuditLogType } from "@/types/user"
+import { useStaff, useCreateStaff, useUpdateStaff, useDeleteStaff, useAuditLogs } from "@/hooks/useStaff"
+import { StaffMember } from "@/types/user"
 import { Skeleton } from "@/components/ui/skeleton"
 
 const ITEMS_PER_PAGE = 10
@@ -61,6 +60,7 @@ export default function UsersPage() {
   const { data: staff, isLoading: isLoadingStaff } = useStaff()
   const { data: auditLogs, isLoading: isLoadingLogs } = useAuditLogs()
   const createStaffMutation = useCreateStaff()
+  const updateStaffMutation = useUpdateStaff()
   const deleteStaffMutation = useDeleteStaff()
 
   const [searchQuery, setSearchQuery] = useState("")
@@ -68,14 +68,16 @@ export default function UsersPage() {
 
   // Modals
   const [addUserOpen, setAddUserOpen] = useState(false)
+  const [editUserOpen, setEditUserOpen] = useState(false)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<StaffMember | null>(null)
 
   // Form state
   const [userForm, setUserForm] = useState({
+    id: "",
     email: "",
     name: "",
-    role: "EventManager" as any,
+    role: "event_manager" as any,
   })
 
   const filteredUsers = (staff || []).filter(
@@ -92,11 +94,11 @@ export default function UsersPage() {
 
   const getRoleBadge = (role: string) => {
     const styles: Record<string, string> = {
-      SuperAdmin: "bg-primary text-primary-foreground",
-      EventManager: "bg-accent text-accent-foreground",
-      FinanceManager: "bg-chart-3 text-white",
+      super_admin: "bg-primary text-primary-foreground",
+      event_manager: "bg-accent text-accent-foreground",
+      finance_manager: "bg-chart-3 text-white",
     }
-    return <Badge className={styles[role] || "bg-secondary"}>{role.replace('_', ' ')}</Badge>
+    return <Badge className={styles[role] || "bg-secondary"}>{role.replace('_', ' ').toUpperCase()}</Badge>
   }
 
   const handleAddUser = async () => {
@@ -108,7 +110,20 @@ export default function UsersPage() {
     createStaffMutation.mutate(userForm as any, {
       onSuccess: () => {
         setAddUserOpen(false)
-        setUserForm({ email: "", name: "", role: "EventManager" })
+        setUserForm({ id: "", email: "", name: "", role: "event_manager" })
+      }
+    })
+  }
+
+  const handleEditUser = () => {
+    if (!userForm.id) return
+    updateStaffMutation.mutate({
+      id: userForm.id,
+      data: { name: userForm.name, email: userForm.email, role: userForm.role }
+    }, {
+      onSuccess: () => {
+        setEditUserOpen(false)
+        setSelectedUser(null)
       }
     })
   }
@@ -121,6 +136,17 @@ export default function UsersPage() {
         setSelectedUser(null)
       }
     })
+  }
+
+  const openEditModal = (user: StaffMember) => {
+    const roleName = user.roles[0]?.role.name || "event_manager"
+    setUserForm({
+      id: user.id,
+      name: user.name || "",
+      email: user.email,
+      role: roleName as any
+    })
+    setEditUserOpen(true)
   }
 
   return (
@@ -186,17 +212,26 @@ export default function UsersPage() {
                         <TableCell>{getRoleBadge(user.roles[0]?.role.name || 'User')}</TableCell>
                         <TableCell>{new Date(user.createdAt).toLocaleDateString()}</TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setSelectedUser(user)
-                              setDeleteConfirmOpen(true)
-                            }}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
+                          <div className="flex justify-end gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openEditModal(user)}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => {
+                                setSelectedUser(user)
+                                setDeleteConfirmOpen(true)
+                              }}
+                              className="text-destructive hover:text-destructive"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -275,6 +310,7 @@ export default function UsersPage() {
         </TabsContent>
       </Tabs>
 
+      {/* Add User Modal */}
       <Dialog open={addUserOpen} onOpenChange={setAddUserOpen}>
         <DialogContent>
           <DialogHeader>
@@ -309,8 +345,8 @@ export default function UsersPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="EventManager">Event Manager</SelectItem>
-                  <SelectItem value="FinanceManager">Finance Manager</SelectItem>
+                  <SelectItem value="event_manager">Event Manager</SelectItem>
+                  <SelectItem value="finance_manager">Finance Manager</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -319,6 +355,57 @@ export default function UsersPage() {
             <Button variant="outline" onClick={() => setAddUserOpen(false)}>Cancel</Button>
             <Button onClick={handleAddUser} disabled={createStaffMutation.isPending}>
               {createStaffMutation.isPending ? "Creating..." : "Add Staff"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit User Modal */}
+      <Dialog open={editUserOpen} onOpenChange={setEditUserOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Staff Member</DialogTitle>
+            <DialogDescription>Update the details for this manager.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Full Name</label>
+              <Input
+                placeholder="Enter full name"
+                value={userForm.name}
+                onChange={(e) => setUserForm({ ...userForm, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Email</label>
+              <Input
+                type="email"
+                placeholder="Enter email address"
+                value={userForm.email}
+                onChange={(e) => setUserForm({ ...userForm, email: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Role</label>
+              <Select
+                value={userForm.role}
+                onValueChange={(value) => setUserForm({ ...userForm, role: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="super_admin">Super Admin</SelectItem>
+                  <SelectItem value="event_manager">Event Manager</SelectItem>
+                  <SelectItem value="finance_manager">Finance Manager</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditUserOpen(false)}>Cancel</Button>
+            <Button onClick={handleEditUser} disabled={updateStaffMutation.isPending}>
+              {updateStaffMutation.isPending ? "Updating..." : "Save Changes"}
             </Button>
           </DialogFooter>
         </DialogContent>

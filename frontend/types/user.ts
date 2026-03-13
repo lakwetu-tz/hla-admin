@@ -20,7 +20,7 @@ export interface StaffMember extends User {
 export interface CreateStaffDTO {
   email: string;
   name: string;
-  role: 'FinanceManager' | 'EventManager';
+  role: 'finance_manager' | 'event_manager';
 }
 
 export interface AuditLog {
